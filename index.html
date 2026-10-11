@@ -38,7 +38,7 @@ button.pri{background:var(--ac);color:#111;border:0;font-weight:600}
 #det,#gm{position:fixed;inset:0;background:var(--bg);overflow:auto;padding:env(safe-area-inset-top) 0 env(safe-area-inset-bottom);display:none;z-index:10}
 #det.on,#gm.on{display:block}
 .gh{grid-column:1/-1;margin:12px 0 0;font-size:15px;color:var(--ac);cursor:pointer;user-select:none}
-.dk{flex-wrap:wrap}.dk select.gs{flex:1 1 100%;order:9;padding:6px;font-size:13px}
+.dkh{margin:12px 0 2px;display:flex;justify-content:space-between;align-items:baseline}
 .in{max-width:560px;margin:0 auto;padding:12px 16px 40px}
 .in img{width:100%;border-radius:10px;display:block}
 h2{margin:14px 0 4px;font-size:20px}
@@ -69,7 +69,7 @@ h2{margin:14px 0 4px;font-size:20px}
 <div id="det"><div class="in" id="din"></div></div>
 <div id="gm"><div class="in" id="gin"></div></div>
 <div id="full"><img id="fimg" alt=""></div>
-<div id="ver" style="text-align:center;color:var(--mu);font-size:11px;padding:0 0 16px">Versão 4 · decks com grupos</div>
+<div id="ver" style="text-align:center;color:var(--mu);font-size:11px;padding:0 0 16px">Versão 5 · cópias em grupos diferentes</div>
 <input id="file" type="file" accept=".zip,.json,image/*" multiple hidden>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 <script>
@@ -103,7 +103,7 @@ async function importFiles(files){
 }
 async function load(){
   cards=((await get('cards'))||[]).map((c,k)=>({...c,_k:k}));imgs=(await get('imgs'))||{};
-  decks=(await get('decks'))||[];cur=(await get('cur'))||'';decks.forEach(d=>{d.groups=d.groups||['Ride Line','Main Deck'];d.grp=d.grp||{}});if(!decks.some(d=>d.id===cur))cur='';
+  decks=(await get('decks'))||[];cur=(await get('cur'))||'';let mig=false;decks.forEach(d=>{d.groups=d.groups||['Ride Line','Main Deck'];if(!d.gc){mig=true;d.gc={};for(const k in d.cards){const g=d.grp&&d.groups.includes(d.grp[k])?d.grp[k]:'';d.gc[k]={[g]:d.cards[k]}}delete d.grp;delete d.last}});if(mig)saveD();if(!decks.some(d=>d.id===cur))cur='';
   Object.values(urls).forEach(URL.revokeObjectURL);urls={};
   $('#empty').hidden=cards.length>0;
   fillFilters();fillDecks();render();
@@ -116,13 +116,15 @@ const img=c=>{const k=base(c.cImage||'');if(!imgs[k])return'';return urls[k]||(u
 const dk=()=>decks.find(d=>d.id===cur);
 const saveD=()=>put('decks',decks);
 const nOf=(d,c)=>(d&&d.cards[c.id])||0;
+const nIn=(D,c,g)=>((D.gc[c.id]||{})[g||''])||0;
+function setN(D,c,g,v,max){g=g||'';const g0=D.gc[c.id]=D.gc[c.id]||{},tot=D.cards[c.id]||0,cur=g0[g]||0;v=Math.max(0,Math.min(v,max-(tot-cur)));if(v)g0[g]=v;else delete g0[g];const t=Object.values(g0).reduce((a,b)=>a+b,0);if(t)D.cards[c.id]=t;else{delete D.cards[c.id];delete D.gc[c.id]}}
 function fillDecks(){
   $('#fd').innerHTML='<option value="">Todas as cartas</option>'+decks.map(d=>`<option value="${esc(d.id)}">${esc(d.name)} (${Object.values(d.cards).reduce((a,b)=>a+b,0)})</option>`).join('')+'<option value="__new">＋ Novo deck…</option>';
   $('#fd').value=cur;
 }
 async function newDeck(name,cardsObj,src){
   name=name||prompt('Nome do deck:');if(!name||!name.trim())return null;
-  const d={id:'d'+Date.now().toString(36),name:name.trim(),cards:cardsObj||{},groups:src?[...src.groups]:['Ride Line','Main Deck'],grp:src?{...src.grp}:{}};
+  const d={id:'d'+Date.now().toString(36),name:name.trim(),cards:cardsObj||{},groups:src?[...src.groups]:['Ride Line','Main Deck'],gc:src?JSON.parse(JSON.stringify(src.gc)):{}};
   decks.push(d);await saveD();return d;
 }
 async function setCur(id){cur=id;await put('cur',id);fillDecks();render()}
@@ -137,17 +139,17 @@ function render(){
     all.forEach(c=>{const n=nOf(D,c);by[c.grade]=(by[c.grade]||0)+n;if(c.type==='Trigger Unit')tr+=n});
     $('#dsum').innerHTML=`<b>${esc(D.name)}</b>: ${tot} cartas · Triggers: ${tr} · `+Object.keys(by).sort().map(g=>`G${g}: ${by[g]}`).join(' · ');
   }
-  const tile=c=>`<div class="c" data-i="${c._k}">${D?`<i class="bdg">×${nOf(D,c)}</i>`:''}<img loading="lazy" src="${img(c)}" alt=""><span>${esc(c.name)}</span></div>`;
-  if(!D){$('#grid').innerHTML=list.map(tile).join('');return}
-  const secs=D.groups.map(g=>[g,list.filter(c=>D.grp[c.id]===g)]);
-  secs.push(['Sem grupo',list.filter(c=>!D.groups.includes(D.grp[c.id]))]);
-  $('#grid').innerHTML=secs.filter(x=>x[1].length).map(([g,l])=>{
-    const n=l.reduce((a,c)=>a+nOf(D,c),0),cl=closed.has(g);
-    return `<div class="gh" data-g="${esc(g)}">${cl?'▸':'▾'} ${esc(g)} · ${n}</div>`+(cl?'':l.map(tile).join(''))}).join('');
+  const tile=(c,g)=>`<div class="c" data-i="${c._k}">${D?`<i class="bdg">×${nIn(D,c,g)}</i>`:''}<img loading="lazy" src="${img(c)}" alt=""><span>${esc(c.name)}</span></div>`;
+  if(!D){$('#grid').innerHTML=list.map(c=>tile(c)).join('');return}
+  const secs=[...D.groups,''].map(g=>[g,list.filter(c=>nIn(D,c,g)>0)]).filter(x=>x[1].length);
+  $('#grid').innerHTML=secs.map(([g,l])=>{
+    const nm=g||'Sem grupo',n=l.reduce((a,c)=>a+nIn(D,c,g),0),cl=closed.has(nm);
+    return `<div class="gh" data-g="${esc(nm)}">${cl?'▸':'▾'} ${esc(nm)} · ${n}</div>`+(cl?'':l.map(c=>tile(c,g)).join(''))}).join('');
 }
 function fx(t){return String(t||'').split('\n').map(p=>`<p>${esc(p).replace(/(\[[^\]]+\](?:\([^)]*\))?)/g,'<em>$1</em>')}</p>`).join('')}
 function detail(i,keep){
   const c=cards[i];if(!c)return;
+  const max=c.count||4;
   const st=[['Grade',c.grade],['Poder',c.power],['Escudo',c.shield],['Crítico',c.critical],['Drive',c.drive],['Qtd',c.count]].filter(x=>x[1]!==undefined&&x[1]!==null&&x[1]!==0&&x[1]!=='');
   $('#din').innerHTML=`<div id="bar"><button id="bk">← Voltar</button><button id="pv">‹</button><button id="nx">›</button></div>
   <img id="di" src="${img(c)}" alt="">
@@ -158,19 +160,16 @@ function detail(i,keep){
   ${(c.race||[]).length?`<div class="tag">Raça: ${esc(c.race.join(' / '))}</div>`:''}
   ${(c.nation||[]).length?`<div class="tag">Nação: ${esc(c.nation.join(', '))}</div>`:''}
   <div class="eff">${fx(c.effect)}</div>
-  <h2>Decks</h2><div id="dks">${decks.map(d=>`<div class="dk" data-d="${esc(d.id)}"><span class="n">${esc(d.name)}</span><button data-s="-1">−</button><b>${nOf(d,c)}</b><button data-s="1">+</button>${nOf(d,c)>0&&d.groups.length?`<select class="gs"><option value="">— sem grupo —</option>${d.groups.map(g=>`<option${d.grp[c.id]===g?' selected':''}>${esc(g)}</option>`).join('')}</select>`:''}</div>`).join('')||'<div class="tag">Nenhum deck criado ainda.</div>'}</div>
+  <h2>Decks</h2><div id="dks">${decks.map(d=>{const gs=d.groups.length?[...d.groups,...(nIn(d,c,'')>0?['']:[])]:[''];return `<div class="dkh"><b>${esc(d.name)}</b><span class="tag" data-t="${esc(d.id)}">${nOf(d,c)}/${max}</span></div>`+gs.map(g=>`<div class="dk" data-d="${esc(d.id)}" data-g="${esc(g)}"><span class="n">${esc(g||'Sem grupo')}</span><button data-s="-1">−</button><b>${nIn(d,c,g)}</b><button data-s="1">+</button></div>`).join('')}).join('')||'<div class="tag">Nenhum deck criado ainda.</div>'}</div>
   <button class="pri" id="dnew" style="margin-top:8px">＋ Novo deck</button>`;
   $('#det').classList.add('on');if(!keep){$('#det').scrollTop=0;history.pushState({d:1},'')}
-  const vis=[...document.querySelectorAll('.c')].map(e=>e.dataset.i),p=vis.indexOf(String(c._k));
+  const vis=[...new Set([...document.querySelectorAll('.c')].map(e=>e.dataset.i))],p=vis.indexOf(String(c._k));
   const go=d=>{const n=vis[p+d];if(n!==undefined)detail(n,true)};
-  const max=c.count||4;
-  $('#dks').onclick=async e=>{const b=e.target.closest('button');if(!b)return;const row=b.closest('.dk'),d=decks.find(x=>x.id===row.dataset.d);
-    const old=nOf(d,c),v=Math.max(0,Math.min(max,old+Number(b.dataset.s)));
-    if(v){d.cards[c.id]=v;if(!old&&d.groups.length)d.grp[c.id]=(d.groups.includes(d.last)?d.last:d.groups[0])}else{delete d.cards[c.id];delete d.grp[c.id]}
-    row.querySelector('b').textContent=v;await saveD();fillDecks();dirty=true;if(!old!==!v)detail(c._k,true)};
-  $('#dks').onchange=async e=>{const sel=e.target.closest('select.gs');if(!sel)return;const d=decks.find(x=>x.id===sel.closest('.dk').dataset.d);
-    if(sel.value){d.grp[c.id]=sel.value;d.last=sel.value}else delete d.grp[c.id];await saveD();dirty=true};
-  $('#dnew').onclick=async()=>{const d=await newDeck();if(d){d.cards[c.id]=1;if(d.groups.length)d.grp[c.id]=d.groups[0];await saveD();fillDecks();dirty=true;detail(c._k,true)}};
+  $('#dks').onclick=async e=>{const b=e.target.closest('button');if(!b)return;const row=b.closest('.dk'),d=decks.find(x=>x.id===row.dataset.d),g=row.dataset.g;
+    setN(d,c,g,nIn(d,c,g)+Number(b.dataset.s),max);await saveD();fillDecks();dirty=true;
+    document.querySelectorAll('#dks .dk').forEach(r=>{r.querySelector('b').textContent=nIn(decks.find(x=>x.id===r.dataset.d),c,r.dataset.g)});
+    document.querySelectorAll('#dks [data-t]').forEach(t=>{t.textContent=nOf(decks.find(x=>x.id===t.dataset.t),c)+'/'+max})};
+  $('#dnew').onclick=async()=>{const d=await newDeck();if(d){setN(d,c,d.groups[0]||'',1,max);await saveD();fillDecks();dirty=true;detail(c._k,true)}};
   $('#bk').onclick=()=>history.back();$('#pv').onclick=()=>go(-1);$('#nx').onclick=()=>go(1);
   $('#di').onclick=()=>{$('#fimg').src=$('#di').src;$('#full').classList.add('on')};
 }
@@ -182,21 +181,21 @@ $('#fd').onchange=async e=>{if(e.target.value==='__new'){const d=await newDeck()
 $('#dren').onclick=async()=>{const d=dk(),n=prompt('Novo nome:',d.name);if(n&&n.trim()){d.name=n.trim();await saveD();fillDecks();render()}};
 $('#ddup').onclick=async()=>{const d=dk(),n=await newDeck(d.name+' (cópia)',{...d.cards},d);if(n)setCur(n.id)};
 $('#ddel').onclick=async()=>{const d=dk();if(confirm('Excluir o deck "'+d.name+'"? As cartas continuam no app.')){decks=decks.filter(x=>x!==d);await saveD();setCur('')}};
-$('#dcp').onclick=async()=>{const d=dk(),own=cards.filter(c=>nOf(d,c)>0),sec=[...d.groups,'Sem grupo'].map(g=>{const l=own.filter(c=>g==='Sem grupo'?!d.groups.includes(d.grp[c.id]):d.grp[c.id]===g);return l.length?g+' ('+l.reduce((a,c)=>a+nOf(d,c),0)+')\n'+l.map(c=>nOf(d,c)+'x '+c.name).join('\n'):''}).filter(Boolean),t=sec.join('\n\n');try{await navigator.clipboard.writeText(d.name+'\n\n'+t);alert('Lista copiada!')}catch(x){prompt('Copie a lista:',t)}};
+$('#dcp').onclick=async()=>{const d=dk(),own=cards.filter(c=>nOf(d,c)>0),sec=[...d.groups,''].map(g=>{const l=own.filter(c=>nIn(d,c,g)>0);return l.length?(g||'Sem grupo')+' ('+l.reduce((a,c)=>a+nIn(d,c,g),0)+')\n'+l.map(c=>nIn(d,c,g)+'x '+c.name).join('\n'):''}).filter(Boolean),t=sec.join('\n\n');try{await navigator.clipboard.writeText(d.name+'\n\n'+t);alert('Lista copiada!')}catch(x){prompt('Copie a lista:',t)}};
 function gmRender(){
   const D=dk();if(!D)return;
-  const cnt=g=>cards.reduce((a,c)=>a+(D.grp[c.id]===g?nOf(D,c):0),0);
+  const cnt=g=>cards.reduce((a,c)=>a+nIn(D,c,g),0);
   $('#gin').innerHTML=`<div id="bar"><button id="gbk">← Voltar</button></div><h2>Grupos de "${esc(D.name)}"</h2>`+
    (D.groups.map((g,i)=>`<div class="dk" data-i="${i}"><span class="n">${esc(g)} · ${cnt(g)}</span><button data-a="up">↑</button><button data-a="dn">↓</button><button data-a="rn">✎</button><button data-a="rm">✕</button></div>`).join('')||'<div class="tag">Nenhum grupo.</div>')+
-   `<button class="pri" id="gadd" style="margin-top:8px">＋ Novo grupo</button><p class="tag">Cartas de um grupo excluído vão para "Sem grupo". Cada carta fica em um único grupo.</p>`;
+   `<button class="pri" id="gadd" style="margin-top:8px">＋ Novo grupo</button><p class="tag">Cartas de um grupo excluído vão para "Sem grupo". A mesma carta pode ter cópias em grupos diferentes.</p>`;
   $('#gbk').onclick=()=>history.back();
   const ch=async()=>{await saveD();gmRender();render()};
   $('#gadd').onclick=async()=>{const n=(prompt('Nome do grupo:')||'').trim();if(n&&!D.groups.includes(n)){D.groups.push(n);ch()}};
   $('#gin').onclick=async e=>{const b=e.target.closest('button[data-a]');if(!b)return;const i=+b.closest('.dk').dataset.i,g=D.groups[i],a=b.dataset.a;
     if(a==='up'&&i>0){[D.groups[i-1],D.groups[i]]=[g,D.groups[i-1]];ch()}
     else if(a==='dn'&&i<D.groups.length-1){[D.groups[i+1],D.groups[i]]=[g,D.groups[i+1]];ch()}
-    else if(a==='rn'){const n=(prompt('Novo nome:',g)||'').trim();if(n&&n!==g&&!D.groups.includes(n)){D.groups[i]=n;for(const k in D.grp)if(D.grp[k]===g)D.grp[k]=n;if(D.last===g)D.last=n;ch()}}
-    else if(a==='rm'&&confirm('Excluir o grupo "'+g+'"?')){D.groups.splice(i,1);for(const k in D.grp)if(D.grp[k]===g)delete D.grp[k];ch()}};
+    else if(a==='rn'){const n=(prompt('Novo nome:',g)||'').trim();if(n&&n!==g&&!D.groups.includes(n)){D.groups[i]=n;for(const k in D.gc)if(g in D.gc[k]){D.gc[k][n]=D.gc[k][g];delete D.gc[k][g]}ch()}}
+    else if(a==='rm'&&confirm('Excluir o grupo "'+g+'"?')){D.groups.splice(i,1);for(const k in D.gc)if(g in D.gc[k]){D.gc[k]['']=(D.gc[k]['']||0)+D.gc[k][g];delete D.gc[k][g]}ch()}};
 }
 $('#dgr').onclick=()=>{gmRender();$('#gm').classList.add('on');$('#gm').scrollTop=0;history.pushState({g:1},'')};
 const pick=()=>$('#file').click();$('#imp').onclick=pick;$('#imp2').onclick=pick;
