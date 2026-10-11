@@ -23,6 +23,16 @@ button.pri{background:var(--ac);color:#111;border:0;font-weight:600}
 .c{background:var(--card);border-radius:8px;overflow:hidden;cursor:pointer}
 .c img{display:block;width:100%;aspect-ratio:59/86;object-fit:cover;background:#0003}
 .c span{display:block;padding:4px 6px;font-size:11px;line-height:1.2;height:2.7em;overflow:hidden}
+#fd{flex:1 1 55%;min-width:0;font-weight:600}
+.c{position:relative}
+.bdg{position:absolute;top:4px;right:4px;background:var(--ac);color:#111;font-weight:700;font-size:12px;border-radius:999px;padding:1px 8px}
+#dbar{display:flex;flex-wrap:wrap;gap:6px;padding:0 12px 6px}
+#dbar button{padding:6px 10px;font-size:13px}
+#dsum{padding:0 14px 6px;font-size:13px;color:var(--mu)}
+.dk{display:flex;align-items:center;gap:8px;background:var(--card);border-radius:10px;padding:6px 10px;margin:6px 0}
+.dk span.n{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dk button{width:36px;padding:6px}
+.dk b{min-width:20px;text-align:center}
 #empty{text-align:center;padding:60px 20px;color:var(--mu)}
 #empty button{margin-top:14px}
 #det{position:fixed;inset:0;background:var(--bg);overflow:auto;padding:env(safe-area-inset-top) 0 env(safe-area-inset-bottom);display:none;z-index:10}
@@ -43,12 +53,15 @@ h2{margin:14px 0 4px;font-size:20px}
 <body>
 <header>
   <input id="q" type="search" placeholder="Buscar nome ou efeito…">
+  <select id="fd"></select>
+  <button class="pri" id="imp">Importar</button>
   <select id="fg"><option value="">Grade</option></select>
   <select id="ft"><option value="">Tipo</option></select>
   <select id="fs"><option value="">Skill</option></select>
-  <button class="pri" id="imp">Importar</button>
 </header>
 <div id="info"></div>
+<div id="dsum" hidden></div>
+<div id="dbar" hidden><button id="dren">Renomear</button><button id="ddup">Duplicar</button><button id="dcp">Copiar lista</button><button id="ddel">Excluir</button></div>
 <div id="grid"></div>
 <div id="empty" hidden>Nenhuma carta importada ainda.<br>Escolha o .zip da pasta (metadata.json + imagens).<br><button class="pri" id="imp2">Importar zip</button></div>
 <div id="det"><div class="in" id="din"></div></div>
@@ -57,7 +70,7 @@ h2{margin:14px 0 4px;font-size:20px}
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 <script>
 const $=s=>document.querySelector(s);
-let cards=[],urls={},imgs=null;
+let cards=[],urls={},imgs=null,decks=[],cur='';
 const DB=()=>new Promise((ok,er)=>{const r=indexedDB.open('vg',1);r.onupgradeneeded=()=>{r.result.createObjectStore('k')};r.onsuccess=()=>ok(r.result);r.onerror=()=>er(r.error)});
 async function idb(mode,fn){const d=await DB();return new Promise((ok,er)=>{const t=d.transaction('k',mode),s=t.objectStore('k');const r=fn(s);t.oncomplete=()=>ok(r&&r.result);t.onerror=()=>er(t.error)})}
 const get=k=>idb('readonly',s=>s.get(k)),put=(k,v)=>idb('readwrite',s=>s.put(v,k));
@@ -86,23 +99,44 @@ async function importFiles(files){
 }
 async function load(){
   cards=((await get('cards'))||[]).map((c,k)=>({...c,_k:k}));imgs=(await get('imgs'))||{};
+  decks=(await get('decks'))||[];cur=(await get('cur'))||'';if(!decks.some(d=>d.id===cur))cur='';
   Object.values(urls).forEach(URL.revokeObjectURL);urls={};
   $('#empty').hidden=cards.length>0;
-  fillFilters();render();
+  fillFilters();fillDecks();render();
 }
 function fillFilters(){
   const set=(id,vals)=>{const s=$(id),f=s.value,h=s.options[0].outerHTML;s.innerHTML=h+[...new Set(vals)].sort((a,b)=>String(a).localeCompare(b,'pt',{numeric:true})).map(v=>`<option>${esc(v)}</option>`).join('');s.value=f};
   set('#fg',cards.map(c=>c.grade));set('#ft',cards.map(c=>c.type));set('#fs',cards.flatMap(c=>c.skill||[]));
 }
 const img=c=>{const k=base(c.cImage||'');if(!imgs[k])return'';return urls[k]||(urls[k]=URL.createObjectURL(imgs[k]))};
+const dk=()=>decks.find(d=>d.id===cur);
+const saveD=()=>put('decks',decks);
+const nOf=(d,c)=>(d&&d.cards[c.id])||0;
+function fillDecks(){
+  $('#fd').innerHTML='<option value="">Todas as cartas</option>'+decks.map(d=>`<option value="${esc(d.id)}">${esc(d.name)} (${Object.values(d.cards).reduce((a,b)=>a+b,0)})</option>`).join('')+'<option value="__new">＋ Novo deck…</option>';
+  $('#fd').value=cur;
+}
+async function newDeck(name,cardsObj){
+  name=name||prompt('Nome do deck:');if(!name||!name.trim())return null;
+  const d={id:'d'+Date.now().toString(36),name:name.trim(),cards:cardsObj||{}};
+  decks.push(d);await saveD();return d;
+}
+async function setCur(id){cur=id;await put('cur',id);fillDecks();render()}
 function render(){
   const q=$('#q').value.toLowerCase(),g=$('#fg').value,t=$('#ft').value,s=$('#fs').value;
-  const list=cards.filter(c=>(!q||(c.name+' '+c.effect).toLowerCase().includes(q))&&(!g||String(c.grade)===g)&&(!t||c.type===t)&&(!s||(c.skill||[]).includes(s)));
-  $('#info').textContent=cards.length?`${list.length} de ${cards.length} cartas`:'';
-  $('#grid').innerHTML=list.map(c=>`<div class="c" data-i="${c._k}"><img loading="lazy" src="${img(c)}" alt=""><span>${esc(c.name)}</span></div>`).join('');
+  const D=dk();
+  const list=cards.filter(c=>(!D||nOf(D,c)>0)&&(!q||(c.name+' '+c.effect).toLowerCase().includes(q))&&(!g||String(c.grade)===g)&&(!t||c.type===t)&&(!s||(c.skill||[]).includes(s)));
+  $('#info').textContent=cards.length?`${list.length} de ${D?cards.filter(c=>nOf(D,c)>0).length:cards.length} cartas`:'';
+  $('#dbar').hidden=!D;$('#dsum').hidden=!D;
+  if(D){
+    const all=cards.filter(c=>nOf(D,c)>0),tot=all.reduce((a,c)=>a+nOf(D,c),0),by={};let tr=0;
+    all.forEach(c=>{const n=nOf(D,c);by[c.grade]=(by[c.grade]||0)+n;if(c.type==='Trigger Unit')tr+=n});
+    $('#dsum').innerHTML=`<b>${esc(D.name)}</b>: ${tot} cartas · Triggers: ${tr} · `+Object.keys(by).sort().map(g=>`G${g}: ${by[g]}`).join(' · ');
+  }
+  $('#grid').innerHTML=list.map(c=>`<div class="c" data-i="${c._k}">${D?`<i class="bdg">×${nOf(D,c)}</i>`:''}<img loading="lazy" src="${img(c)}" alt=""><span>${esc(c.name)}</span></div>`).join('');
 }
 function fx(t){return String(t||'').split('\n').map(p=>`<p>${esc(p).replace(/(\[[^\]]+\](?:\([^)]*\))?)/g,'<em>$1</em>')}</p>`).join('')}
-function detail(i){
+function detail(i,keep){
   const c=cards[i];if(!c)return;
   const st=[['Grade',c.grade],['Poder',c.power],['Escudo',c.shield],['Crítico',c.critical],['Drive',c.drive],['Qtd',c.count]].filter(x=>x[1]!==undefined&&x[1]!==null&&x[1]!==0&&x[1]!=='');
   $('#din').innerHTML=`<div id="bar"><button id="bk">← Voltar</button><button id="pv">‹</button><button id="nx">›</button></div>
@@ -113,10 +147,17 @@ function detail(i){
   ${(c.skill||[]).length?`<div class="tag">Skill: ${esc(c.skill.join(', '))}</div>`:''}
   ${(c.race||[]).length?`<div class="tag">Raça: ${esc(c.race.join(' / '))}</div>`:''}
   ${(c.nation||[]).length?`<div class="tag">Nação: ${esc(c.nation.join(', '))}</div>`:''}
-  <div class="eff">${fx(c.effect)}</div>`;
-  $('#det').classList.add('on');$('#det').scrollTop=0;history.pushState({d:1},'');
+  <div class="eff">${fx(c.effect)}</div>
+  <h2>Decks</h2><div id="dks">${decks.map(d=>`<div class="dk" data-d="${esc(d.id)}"><span class="n">${esc(d.name)}</span><button data-s="-1">−</button><b>${nOf(d,c)}</b><button data-s="1">+</button></div>`).join('')||'<div class="tag">Nenhum deck criado ainda.</div>'}</div>
+  <button class="pri" id="dnew" style="margin-top:8px">＋ Novo deck</button>`;
+  $('#det').classList.add('on');if(!keep){$('#det').scrollTop=0;history.pushState({d:1},'')}
   const vis=[...document.querySelectorAll('.c')].map(e=>e.dataset.i),p=vis.indexOf(String(c._k));
-  const go=d=>{const n=vis[p+d];if(n!==undefined)detail(n)};
+  const go=d=>{const n=vis[p+d];if(n!==undefined)detail(n,true)};
+  const max=c.count||4;
+  $('#dks').onclick=async e=>{const b=e.target.closest('button');if(!b)return;const row=b.closest('.dk'),d=decks.find(x=>x.id===row.dataset.d);
+    const v=Math.max(0,Math.min(max,nOf(d,c)+Number(b.dataset.s)));if(v)d.cards[c.id]=v;else delete d.cards[c.id];
+    row.querySelector('b').textContent=v;await saveD();fillDecks();render()};
+  $('#dnew').onclick=async()=>{const d=await newDeck();if(d){d.cards[c.id]=1;await saveD();fillDecks();render();detail(c._k,true)}};
   $('#bk').onclick=()=>history.back();$('#pv').onclick=()=>go(-1);$('#nx').onclick=()=>go(1);
   $('#di').onclick=()=>{$('#fimg').src=$('#di').src;$('#full').classList.add('on')};
 }
@@ -124,6 +165,11 @@ $('#grid').onclick=e=>{const c=e.target.closest('.c');if(c)detail(c.dataset.i)};
 $('#full').onclick=()=>$('#full').classList.remove('on');
 addEventListener('popstate',()=>{$('#det').classList.remove('on');$('#full').classList.remove('on')});
 ['#q','#fg','#ft','#fs'].forEach(s=>$(s).addEventListener('input',render));
+$('#fd').onchange=async e=>{if(e.target.value==='__new'){const d=await newDeck();await setCur(d?d.id:cur)}else setCur(e.target.value)};
+$('#dren').onclick=async()=>{const d=dk(),n=prompt('Novo nome:',d.name);if(n&&n.trim()){d.name=n.trim();await saveD();fillDecks();render()}};
+$('#ddup').onclick=async()=>{const d=dk(),n=await newDeck(d.name+' (cópia)',{...d.cards});if(n)setCur(n.id)};
+$('#ddel').onclick=async()=>{const d=dk();if(confirm('Excluir o deck "'+d.name+'"? As cartas continuam no app.')){decks=decks.filter(x=>x!==d);await saveD();setCur('')}};
+$('#dcp').onclick=async()=>{const d=dk(),t=cards.filter(c=>nOf(d,c)>0).map(c=>nOf(d,c)+'x '+c.name).join('\n');try{await navigator.clipboard.writeText(d.name+'\n'+t);alert('Lista copiada!')}catch(x){prompt('Copie a lista:',t)}};
 const pick=()=>$('#file').click();$('#imp').onclick=pick;$('#imp2').onclick=pick;
 $('#file').onchange=async e=>{const f=[...e.target.files];e.target.value='';if(!f.length)return;$('#info').textContent='Importando…';try{await importFiles(f)}catch(x){alert('Erro ao importar: '+x.message)}};
 if('serviceWorker'in navigator)navigator.serviceWorker.register('sw.js');
